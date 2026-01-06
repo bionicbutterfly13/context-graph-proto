@@ -1,3 +1,7 @@
+import argparse
+import os
+from models import ContextNode, ContextEdge, EntityContext, RelationContext, ChunkNode, CommunityNode
+from neo4j_provider import Neo4jContextGraph
 from llm_util import LLMInterface
 from reasoner import MACERReasoner
 
@@ -35,7 +39,7 @@ def ingest_sample_data(provider: Neo4jContextGraph):
     provider.add_triplet_with_context(edge1, chunk_ids=["C1", "C2"])
 
 def main():
-    parser = argparse.ArgumentParser(description="Context Graph (CGR3 Phase 3) Implementation")
+    parser = argparse.ArgumentParser(description="Context Graph (CGR3/ToG-3/CATS) Implementation")
     parser.add_argument("--query", type=str, required=True, help="User query to process")
     parser.add_argument("--ingest", action="store_true", help="Ingest sample data into Neo4j")
     
@@ -54,15 +58,16 @@ def main():
             print("Ingestion complete.\n")
         except Exception as e:
             print(f"Ingestion failed: {e}")
+            provider.close()
             return
 
     # Initialize Components
     llm = LLMInterface()
     reasoner = MACERReasoner(provider, llm)
     
-    print(f"Executing CGR3 Reasoning Loop for: '{args.query}'\n")
+    print(f"Executing Integrated Reasoning Loop for: '{args.query}'\n")
     
-    # Run Retrieve-Rank-Reason
+    # Run Retrieve-Rank-Reason (ToG-3 MACER Loop)
     results = reasoner.reason(args.query)
     
     if results["answer"]:
@@ -71,12 +76,14 @@ def main():
     else:
         print("\nSufficiency Gate: Insufficient information to provide a verified answer.")
     
-    print("\n--- Gathered Context ---")
+    print("\n--- Gathered Context (Sub-graph) ---")
     for ctx in results["final_context"]:
         tail = ctx['tail']
         tr = ctx['tr']
         print(f"Fact: {tr['relation']} -> {tail['label']}")
-        print(f"  Temporal: {[f'{k}:{v}' for k,v in tr.items() if k.startswith('temporal')]}")
+        temporal = [f"{k}:{v}" for k,v in tr.items() if k.startswith('temporal')]
+        if temporal:
+             print(f"  Temporal: {temporal}")
             
     provider.close()
 

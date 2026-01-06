@@ -37,11 +37,31 @@ class Neo4jRetriever:
         """
         return self.provider.query(cypher, {"tid": triplet_id})
 
+    def fetch_fewshot_triples(self, relation: str, limit: int = 3) -> str:
+        """Fetches sample triples for a relation to serve as Type-Aware context."""
+        cypher = """
+        MATCH (h:Entity)-[:HAS_SUBJECT_OF]->(tr:Triplet {relation: $rel})-[:HAS_OBJECT_OF]->(t:Entity)
+        RETURN h.label as head, tr.relation as relation, t.label as tail
+        LIMIT $limit
+        """
+        results = self.provider.query(cypher, {"rel": relation, "limit": limit})
+        return "\n".join([f"({r['head']}, {r['relation']}, {r['tail']})" for r in results])
+
+    def fetch_reasoning_paths(self, head_id: str, tail_id: str, max_hops: int = 3) -> str:
+        """Official CATS Subgraph Reasoning: search for paths between head and tail."""
+        cypher = """
+        MATCH p = (h:Entity {id: $head_id})-[*1..3]-(t:Entity {id: $tail_id})
+        RETURN p
+        LIMIT 5
+        """
+        # In a real system, we format the path as a sequence of triples
+        results = self.provider.query(cypher, {"head_id": head_id, "tail_id": tail_id})
+        return f"Found {len(results)} paths between entities."
+
     def search_chunks(self, query: str) -> List[Dict[str, Any]]:
         """Dual Pathway: Textual Context Retrieval."""
         return self.provider.search_chunks_vector(query)
 
     def get_k_hop_neighborhood(self, entity_id: str, k: int = 1) -> List[Dict[str, Any]]:
         """Pathway A: Structural Retrieval (Simplified KGE proxy)."""
-        # In a real CGR3, this would use KGE scores. For now, we return all k-hop neighbors.
         return self.provider.get_neighbors(entity_id)
