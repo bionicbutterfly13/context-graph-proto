@@ -2,6 +2,13 @@
 
 A significant advancement in Graph-based Retrieval-Augmented Generation (GraphRAG), integrating the **Context Graph** paradigm with **Think-on-Graph 3.0 (ToG-3)**. This prototype moves from static graph traversal to a dynamic, multi-agent evolutionary process powered by Neo4j.
 
+## Architectural Philosophy (AI Field Theory)
+
+This implementation is grounded in the three pillars of AI Field Theory:
+1.  **Continuity (The Flow)**: Replacing discrete tokens with a multi-layered information web (Chunks $\to$ Triplets $\to$ Communities).
+2.  **Attractors (The Gravity)**: Establishing stability through deep contextual metadata (Temporal, Geographic, Provenance).
+3.  **Resonance (The Vibration)**: Utilizing the **MACER** loop to filter noise and amplify high-fidelity evidence via iterative ranking and path pruning.
+
 ## Core Features
 
 ### 1. Heterogeneous Graph Index (MACER)
