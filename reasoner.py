@@ -1,58 +1,89 @@
-from typing import List, Dict, Any, Optional
-from retriever import MockRetriever
-from ranker import MockRanker
+from typing import List, Dict, Any, Tuple, Optional
+from neo4j_provider import Neo4jContextGraph
 
-class ContextReasoner:
-    """Simulates the 'Reason' stage of CGR^3."""
+class MACERConstructor:
+    """Agent that builds a task-specific sub-graph context."""
+    def __init__(self, provider: Any):
+        self.provider = provider
+        self.subgraph = []
+
+    def expand(self, entities: List[str]):
+        """Fetches neighbors and adds them to the local sub-graph."""
+        for eid in entities:
+            results = self.provider.get_neighbors(eid)
+            for res in results:
+                self.subgraph.append(res)
+        return self.subgraph
+
+class MACERReflector:
+    """Agent that evaluates context sufficiency and generates evolution queries."""
+    def __init__(self):
+        pass
+
+    def evaluate(self, query: str, context: List[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
+        """
+        Heuristic-based evaluation of context sufficiency.
+        In a real ToG-3 implementaton, this uses an LLM.
+        """
+        # Simple heuristic: if we have more than 3 triples, assume sufficient for prototype
+        if len(context) >= 3:
+            return True, None
+        
+        # Otherwise, suggest a sub-query to find more info about the tail entities
+        if context:
+            last_tail = context[-1].get('tail', {}).get('label', 'unknown')
+            return False, f"Tell me more about {last_tail} in the context of {query}"
+        
+        return False, "Retrieve more entities related to the query."
+
+class MACERReasoner:
+    """Multi-Agent Context Evolution and Retrieval (From ToG-3)."""
     
-    def __init__(self, retriever: MockRetriever, ranker: MockRanker, beam_width: int = 3, max_hops: int = 2):
-        self.retriever = retriever
-        self.ranker = ranker
-        self.beam_width = beam_width
-        self.max_hops = max_hops
+    def __init__(self, provider: Any, max_iterations: int = 3):
+        self.provider = provider
+        self.constructor = MACERConstructor(provider)
+        self.reflector = MACERReflector()
+        self.max_iterations = max_iterations
 
-    def reason(self, query: str) -> List[Dict[str, Any]]:
-        """
-        Performs iterative graph traversal (multi-hop) to gather context.
-        Uses a simplified beam search strategy.
-        """
-        # Step 1: Initialization (Entities extraction)
-        topic_entities = self.retriever.retrieve_topic_entities(query)
-        if not topic_entities:
-            return []
-
-        gathered_context = []
-        current_beam = [(entity.entity_id, 0) for entity in topic_entities] # (entity_id, hop_count)
-        visited = set()
-
-        # Step 2: Multi-hop Traversal
-        for hop in range(self.max_hops):
-            next_beam_candidates = []
+    def reason(self, query: str) -> Dict[str, Any]:
+        """The iterative MACER reasoning loop."""
+        current_query = query
+        all_context = []
+        
+        for i in range(self.max_iterations):
+            print(f"Iteration {i+1}: Processing query '{current_query}'")
             
-            for entity_id, _ in current_beam:
-                if entity_id in visited:
-                    continue
-                visited.add(entity_id)
-                
-                # Retrieval: Fetch immediate triples
-                triples = self.retriever.fetch_triples_and_context(entity_id)
-                
-                # Ranking: Score and filter triples
-                ranked_triples = self.ranker.rank_candidates(query, triples)
-                
-                # Keep top-K based on beam width
-                for triple, score in ranked_triples[:self.beam_width]:
-                    gathered_context.append({
-                        "hop": hop + 1,
-                        "data": triple,
-                        "score": score
-                    })
-                    next_beam_candidates.append((triple['tail'].entity_id, hop + 1))
+            # 1. Retrieval (Simplified: find entities in current_query)
+            # In a real system, this would use a semantic search or entity extractor
+            entities_to_expand = self._extract_entities(current_query)
             
-            if not next_beam_candidates:
+            # 2. Construction: Evolution of the sub-graph
+            new_context = self.constructor.expand(entities_to_expand)
+            all_context.extend(new_context)
+            
+            # 3. Reflection: Check if we have enough context
+            is_sufficient, evolution_query = self.reflector.evaluate(query, all_context)
+            
+            if is_sufficient:
+                print("Reflector: Context is sufficient.")
                 break
-                
-            # Update beam for next hop
-            current_beam = next_beam_candidates[:self.beam_width]
+            else:
+                print(f"Reflector: Insufficient context. Evolving query to: '{evolution_query}'")
+                current_query = evolution_query
 
-        return gathered_context
+        return {
+            "query": query,
+            "final_context": all_context,
+            "iterations": i + 1
+        }
+
+    def _extract_entities(self, query: str) -> List[str]:
+        """Simple entity extractor using label matching in Neo4j."""
+        cypher = "MATCH (e:Entity) RETURN e.id as id, e.label as label"
+        all_entities = self.provider.query(cypher)
+        
+        found_ids = []
+        for ent in all_entities:
+            if ent['label'].lower() in query.lower():
+                found_ids.append(ent['id'])
+        return found_ids

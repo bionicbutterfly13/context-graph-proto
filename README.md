@@ -1,50 +1,53 @@
-# Context Graph Prototype ($CGR^3$)
+# Enhanced Context Graph Prototype (ToG-3 + Neo4j)
 
-A prototypical implementation of the Context Graph architecture, leveraging the **CGR³ (Retrieval-Rank-Reason)** paradigm to enable multi-hop reasoning with rich temporal, geographic, and provenance-based contexts. Based on the original "Context Graph" paper.
+A significant advancement in Graph-based Retrieval-Augmented Generation (GraphRAG), integrating the **Context Graph** paradigm with **Think-on-Graph 3.0 (ToG-3)**. This prototype moves from static graph traversal to a dynamic, multi-agent evolutionary process powered by Neo4j.
 
-## Core Paradigm: $CGR^3$
+## Core Features
 
-- **Retrieval**: Extracting topic entities and fetching immediate contextual triples (Entity Context $ec$ and Relation Context $rc$).
-- **Rank**: Scoring candidate facts using LLM-inspired relevance metrics and context availability.
-- **Reason**: Multi-hop graph traversal (beam search) to recursively gather evidence and answer complex queries across the graph.
+### 1. Heterogeneous Graph Index (MACER)
+The graph structure is now multi-level, combining different granularities of information:
+- **Chunks (C)**: Raw text segments providing granular evidence.
+- **Triplets (T)**: Reified semantic facts $(s, p, o)$ with detailed context (temporal, provenance).
+- **Communities (M)**: High-level summaries of entity clusters for global topical context.
 
-## Key Features
+### 2. MACER Reasoning Loop
+The reasoning logic implements **Multi-Agent Context Evolution and Retrieval**:
+- **Constructor Agent**: Dynamically builds task-specific sub-graphs from the heterogeneous index.
+- **Reflector Agent**: Evaluates the gathered context against the query and triggers "evolution" (sub-querying) if information is insufficient.
+- **Dual-Evolution**: Iteratively expands the available evidence until the reasoning path is complete.
 
-- **Rich Context Models**: Support for temporal data (validity period), geographic location, provenance (supporting sentences), and quantitative attributes.
-- **Multi-Hop Traversal**: Automated reasoning pipeline that explores the graph recursively using a configurable beam width.
-- **Entity & Relation Contexts**: Formal implementation of $CG = \{ \mathcal{E}, \mathcal{R}, \mathcal{Q}, \mathcal{EC}, \mathcal{RC} \}$.
-- **Python-Based Core**: Lightweight, extensible architecture using a custom in-memory graph store.
+### 3. Neo4j Backend
+- **Advanced Persistence**: Every fact is stored as a first-class citizen with rich properties.
+- **Scalable Retrieval**: Leverages Neo4j's graph querying capabilities for multi-hop discovery.
 
 ## Getting Started
-
-### Prerequisites
-- Python 3.8+
-- `pytest` (for running tests)
 
 ### Installation
 ```bash
 git clone https://github.com/bionicbutterfly13/context-graph-proto.git
 cd context-graph-proto
+pip install neo4j pytest
 ```
 
 ### Usage
-Run the prototype with a sample query:
-```bash
-python main.py --query "Tell me about Albert Einstein winning the Nobel Prize in 1921."
-```
+1. **Ingest Sample Data**:
+   Populate your Neo4j instance with context-rich data:
+   ```bash
+   python main.py --query "initialization" --ingest --uri bolt://localhost:7687 --user neo4j --password your_password
+   ```
 
-### Running Tests
-```bash
-PYTHONPATH=. pytest tests/test_context_graph.py
-```
+2. **Run ToG-3 Reasoner**:
+   Execute the iterative reasoning loop:
+   ```bash
+   python main.py --query "Tell me about Albert Einstein in 1921." --password your_password
+   ```
 
 ## Project Structure
-- `models.py`: Data structures for Entity and Relation contexts.
-- `graph.py`: In-memory Context Graph implementation.
-- `retriever.py`: CGR³ Retrieval logic.
-- `ranker.py`: CGR³ Ranking logic.
-- `reasoner.py`: CGR³ Reasoning and multi-hop traversal.
-- `main.py`: CLI entry point and sample dataset.
+- `neo4j_provider.py`: Neo4j connection and schema management.
+- `models.py`: Heterogeneous data structures (Chunk, Triplet, Community).
+- `reasoner.py`: MACER Agent Loop implementation.
+- `retriever.py`: Multi-level context fetching.
 
-## Acknowledgments
-Implemented based on the architectural principles outlined in the **"Context Graph"** paper.
+## References
+- **"Context Graph"** original paper.
+- **"Think-on-Graph 3.0" (ToG-3)** paper.

@@ -20,10 +20,26 @@ class RelationContext:
     details: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
+class ChunkNode:
+    """Represents a fine-grained text passage context (From TOG-3)."""
+    chunk_id: str
+    content: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class CommunityNode:
+    """Represents a high-level summary of entity clusters (From TOG-3)."""
+    community_id: str
+    label: str
+    summary: str
+    entities: List[str] = field(default_factory=list) # Entity IDs
+
+@dataclass
 class ContextNode:
     """Represents an entity E = (e, ec)."""
     entity_id: str
     label: str
+    type: str = "Entity" # Entity, Chunk, or Community
     context: EntityContext = field(default_factory=EntityContext)
 
     def __hash__(self):
@@ -37,7 +53,7 @@ class ContextNode:
 @dataclass
 class ContextEdge:
     """Represents a fact (h, r, t, rc)."""
-    head: str  # Entity ID
+    head: str  # Node ID (Entity, Chunk, or Triplet ID)
     relation: str
-    tail: str  # Entity ID
+    tail: str  # Node ID
     context: RelationContext = field(default_factory=RelationContext)

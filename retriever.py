@@ -1,30 +1,40 @@
 from typing import List, Dict, Any
-from graph import ContextGraph
-from models import ContextNode, ContextEdge, EntityContext, RelationContext
+from models import ContextNode, ContextEdge, EntityContext, RelationContext, ChunkNode, CommunityNode
+from neo4j_provider import Neo4jContextGraph
 
-class MockRetriever:
-    """Simulates the 'Retrieval' stage of CGR^3."""
+class Neo4jRetriever:
+    """Retriever that fetches multi-level context from Neo4j."""
     
-    def __init__(self, graph: ContextGraph):
-        self.graph = graph
+    def __init__(self, provider: Neo4jContextGraph):
+        self.provider = provider
 
-    def retrieve_topic_entities(self, query: str) -> List[ContextNode]:
-        """Search graph for entities mentioned in query."""
-        # Simple simulation: look for matching substrings in the query
-        found = []
-        for node in self.graph.nodes.values():
-            if node.label.lower() in query.lower():
-                found.append(node)
-        return found
+    def retrieve_entities_by_label(self, label_substring: str) -> List[str]:
+        """Search Neo4j for entities matching a label."""
+        cypher = "MATCH (e:Entity) WHERE e.label CONTAINS $label RETURN e.id as id"
+        results = self.provider.query(cypher, {"label": label_substring})
+        return [res['id'] for res in results]
 
-    def fetch_triples_and_context(self, entity_id: str) -> List[Dict[str, Any]]:
-        """Fetch relations and their context for a given entity."""
-        return self.graph.get_triples_with_context(entity_id)
+    def fetch_community_context(self, entity_ids: List[str]) -> List[Dict[str, Any]]:
+        """Fetches community summaries for a set of entities."""
+        cypher = """
+        MATCH (e:Entity)-[:PART_OF]->(m:Community)
+        WHERE e.id IN $ids
+        RETURN DISTINCT m.id as id, m.label as label, m.summary as summary
+        """
+        return self.provider.query(cypher, {"ids": entity_ids})
 
-    def fetch_supporting_sentences(self, head_label: str, tail_label: str) -> List[str]:
-        """Simulates Wikipedia context retrieval using semantic similarity."""
-        # In a real system, this would use embeddings and an external corpus.
-        return [
-            f"{head_label} and {tail_label} are often cited together in historical records.",
-            f"The relationship between {head_label} and {tail_label} was established during the early 20th century."
-        ]
+    def fetch_chunk_context(self, triplet_id: str) -> List[Dict[str, Any]]:
+        """Fetches raw text chunks supporting a specific triplet."""
+        cypher = """
+        MATCH (tr:Triplet {id: $tid})-[:EVIDENCE_IN]->(c:Chunk)
+        RETURN c.id as id, c.content as content, c.metadata as metadata
+        """
+        return self.provider.query(cypher, {"tid": triplet_id})
+
+    def search_chunks(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Vector search or keyword search for relevant chunks.
+        In a real system, this would use Neo4j Vector Index.
+        """
+        cypher = "MATCH (c:Chunk) WHERE c.content CONTAINS $query RETURN c"
+        return self.provider.query(cypher, {"query": query})
