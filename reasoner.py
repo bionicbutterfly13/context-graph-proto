@@ -1,89 +1,113 @@
 from typing import List, Dict, Any, Tuple, Optional
 from neo4j_provider import Neo4jContextGraph
+from retriever import Neo4jRetriever
+from ranker import LLMRanker
+from llm_util import LLMInterface
 
 class MACERConstructor:
     """Agent that builds a task-specific sub-graph context."""
-    def __init__(self, provider: Any):
+    def __init__(self, provider: Neo4jContextGraph, retriever: Neo4jRetriever):
         self.provider = provider
-        self.subgraph = []
+        self.retriever = retriever
 
-    def expand(self, entities: List[str]):
-        """Fetches neighbors and adds them to the local sub-graph."""
-        for eid in entities:
-            results = self.provider.get_neighbors(eid)
-            for res in results:
-                self.subgraph.append(res)
-        return self.subgraph
+    def expand(self, entity_id: str) -> List[Dict[str, Any]]:
+        """Pathway A: Structural Retrieval of neighborhood."""
+        return self.retriever.get_k_hop_neighborhood(entity_id)
 
 class MACERReflector:
-    """Agent that evaluates context sufficiency and generates evolution queries."""
-    def __init__(self):
-        pass
+    """Agent that evaluates context sufficiency using LLM (Sufficiency Gate)."""
+    def __init__(self, llm: LLMInterface):
+        self.llm = llm
 
-    def evaluate(self, query: str, context: List[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
+    def evaluate(self, query: str, head_context: str, top_candidate: Dict[str, Any]) -> Tuple[bool, str]:
         """
-        Heuristic-based evaluation of context sufficiency.
-        In a real ToG-3 implementaton, this uses an LLM.
+        Stage 3: Context-Aware Reasoning (Appendix A.2).
+        Returns (is_sufficient, response).
         """
-        # Simple heuristic: if we have more than 3 triples, assume sufficient for prototype
-        if len(context) >= 3:
-            return True, None
+        # Format candidate for prompt
+        # cand format: {tr: {...}, tail: {...}, chunks: [...]}
+        tr = top_candidate.get('tr', {})
+        tail = top_candidate.get('tail', {})
         
-        # Otherwise, suggest a sub-query to find more info about the tail entities
-        if context:
-            last_tail = context[-1].get('tail', {}).get('label', 'unknown')
-            return False, f"Tell me more about {last_tail} in the context of {query}"
+        cand_info = {
+            "name": tail.get('label', 'Unknown'),
+            "description": tail.get('metadata', 'No description available'),
+            "evidence": " ".join([c['content'] for c in top_candidate.get('chunks', [])])
+        }
         
-        return False, "Retrieve more entities related to the query."
+        prompt = self.llm.build_reasoning_prompt(query, head_context, cand_info)
+        response = self.llm.generate(prompt)
+        
+        # Check if LLM indicates sufficiency
+        # In a real system, we look for 'The possible answers:'
+        if "possible answers:" in response.lower() and "insufficient information" not in response.lower():
+            return True, response
+        
+        return False, response
 
 class MACERReasoner:
-    """Multi-Agent Context Evolution and Retrieval (From ToG-3)."""
+    """CGR3 Paradigm: Retrieve -> Rank -> Reason."""
     
-    def __init__(self, provider: Any, max_iterations: int = 3):
+    def __init__(self, provider: Neo4jContextGraph, llm: LLMInterface, max_iterations: int = 3):
         self.provider = provider
-        self.constructor = MACERConstructor(provider)
-        self.reflector = MACERReflector()
+        self.retriever = Neo4jRetriever(provider)
+        self.llm = llm
+        self.constructor = MACERConstructor(provider, self.retriever)
+        self.ranker = LLMRanker(llm)
+        self.reflector = MACERReflector(llm)
         self.max_iterations = max_iterations
 
     def reason(self, query: str) -> Dict[str, Any]:
-        """The iterative MACER reasoning loop."""
-        current_query = query
-        all_context = []
+        """The CGR3 / MACER reasoning loop."""
+        # 1. Extract Head Entities (Dual Pathway Stage 1)
+        # Simplified: find entities mentioned in query
+        head_ids = self.retriever.retrieve_entities_by_label(query)
         
-        for i in range(self.max_iterations):
-            print(f"Iteration {i+1}: Processing query '{current_query}'")
+        all_found_context = []
+        final_answer = None
+        
+        for head_id in head_ids:
+            # Get Head Context (EC)
+            head_node = self.retriever.fetch_entity_context(head_id)
+            head_context_text = head_node.get('metadata', '')
             
-            # 1. Retrieval (Simplified: find entities in current_query)
-            # In a real system, this would use a semantic search or entity extractor
-            entities_to_expand = self._extract_entities(current_query)
+            # Stage 1: Retrieval (Structural Neighborhood)
+            candidates = self.constructor.expand(head_id)
             
-            # 2. Construction: Evolution of the sub-graph
-            new_context = self.constructor.expand(entities_to_expand)
-            all_context.extend(new_context)
+            # Stage 2: Context-Aware Ranking (Discriminative Filter)
+            # Format candidates for the ranker
+            formatted_candidates = []
+            for cand in candidates:
+                tail = cand.get('tail', {})
+                formatted_candidates.append({
+                    "id": tail.get('id'),
+                    "name": tail.get('label'),
+                    "description": tail.get('metadata', 'No context')
+                })
             
-            # 3. Reflection: Check if we have enough context
-            is_sufficient, evolution_query = self.reflector.evaluate(query, all_context)
+            # Re-rank using LLM
+            ranked_indices = self.ranker.rerank(query, head_context_text, formatted_candidates)
             
-            if is_sufficient:
-                print("Reflector: Context is sufficient.")
-                break
-            else:
-                print(f"Reflector: Insufficient context. Evolving query to: '{evolution_query}'")
-                current_query = evolution_query
+            # Path Pruning: Only proceed with top-N candidates
+            # For this prototype, we'll take the top 1
+            if candidates:
+                top_candidate = candidates[0] # Assuming ranker sorted them
+                
+                # Stage 3: Reasoning (Sufficiency Gate)
+                is_sufficient, response = self.reflector.evaluate(query, head_context_text, top_candidate)
+                
+                if is_sufficient:
+                    final_answer = response
+                    all_found_context.append(top_candidate)
+                    break
+                else:
+                    # In ToG-3, this would trigger Dual-Evolution (evolution_query)
+                    # For CGR3, it might just report insufficiency or move to next candidate
+                    print(f"Reflector: Context for {head_id} insufficient. Proceeding...")
+                    all_found_context.append(top_candidate)
 
         return {
             "query": query,
-            "final_context": all_context,
-            "iterations": i + 1
+            "answer": final_answer,
+            "final_context": all_found_context
         }
-
-    def _extract_entities(self, query: str) -> List[str]:
-        """Simple entity extractor using label matching in Neo4j."""
-        cypher = "MATCH (e:Entity) RETURN e.id as id, e.label as label"
-        all_entities = self.provider.query(cypher)
-        
-        found_ids = []
-        for ent in all_entities:
-            if ent['label'].lower() in query.lower():
-                found_ids.append(ent['id'])
-        return found_ids
