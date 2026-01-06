@@ -1,6 +1,6 @@
 # Enhanced Context Graph Prototype (ToG-3 + Neo4j)
 
-A significant advancement in Graph-based Retrieval-Augmented Generation (GraphRAG), integrating the **Context Graph** paradigm with **Think-on-Graph 3.0 (ToG-3)**. This prototype moves from static graph traversal to a dynamic, multi-agent evolutionary process powered by Neo4j.
+Neuro-symbolic Context Graph implementation using CGR3, ToG-3 (MACER), and Neo4j for deep, context-aware reasoning.
 
 ## Architectural Philosophy (AI Field Theory)
 
